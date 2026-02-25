@@ -197,6 +197,71 @@ ensure_dir() {
 }
 
 # -----------------------------------------------------------------------------
+# Install Functions
+# -----------------------------------------------------------------------------
+
+install_xcompose() {
+    local xcompose_file="${HOME}/.XCompose"
+    local include_line='include "%L"'
+    local cedilla_lower='<dead_acute> <c> : "ç" ccedilla'
+    local cedilla_upper='<dead_acute> <C> : "Ç" Ccedilla'
+
+    info "  Configuring ~/.XCompose ..."
+    backup_file "$xcompose_file"
+
+    if [[ ! -f "$xcompose_file" ]]; then
+        # File does not exist — create it with all three lines
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            info "  Would create ~/.XCompose with cedilla overrides"
+            return 0
+        fi
+        ensure_dir "$xcompose_file"
+        printf '%s\n%s\n%s\n' "$include_line" "$cedilla_lower" "$cedilla_upper" > "$xcompose_file"
+        info "  Created ~/.XCompose with cedilla overrides"
+        return 0
+    fi
+
+    # File exists — ensure include "%L" is present as the first line
+    if ! grep -qF "$include_line" "$xcompose_file"; then
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            info "  Would prepend include \"%L\" to ~/.XCompose"
+        else
+            local tmp
+            tmp="$(mktemp)"
+            printf '%s\n' "$include_line" > "$tmp"
+            cat "$xcompose_file" >> "$tmp"
+            mv "$tmp" "$xcompose_file"
+            info "  Prepended include \"%L\" to ~/.XCompose"
+        fi
+    fi
+
+    # Append dead_acute overrides if missing (merge_line handles DRY_RUN)
+    if merge_line "$xcompose_file" "$cedilla_lower"; then
+        info "  Added lowercase cedilla override"
+    fi
+    if merge_line "$xcompose_file" "$cedilla_upper"; then
+        info "  Added uppercase cedilla override"
+    fi
+}
+
+install_environment() {
+    local env_file="${HOME}/.config/environment.d/cedilla.conf"
+    local block
+    block="$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+        'INPUT_METHOD=fcitx' \
+        'GTK_IM_MODULE=fcitx' \
+        'QT_IM_MODULE=fcitx' \
+        'XMODIFIERS=@im=fcitx' \
+        'SDL_IM_MODULE=fcitx' \
+        "XCOMPOSEFILE=\${HOME}/.XCompose")"
+
+    info "  Configuring ~/.config/environment.d/cedilla.conf ..."
+    backup_file "$env_file"
+    merge_block "$env_file" "$block" "environment"
+    info "  Environment variables configured"
+}
+
+# -----------------------------------------------------------------------------
 # Animation Functions
 # -----------------------------------------------------------------------------
 
