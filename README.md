@@ -180,6 +180,33 @@ Chromium-based browsers need the `--enable-wayland-ime` flag. The script adds th
 bash cedilla-fix.sh  # Re-run to pick up new browsers
 ```
 
+### Question mark (?) produces colon (:) or other wrong characters
+
+If you added `br` (Brazilian ABNT2) as a secondary keyboard layout alongside `us`, switching to the BR layout on a **US physical keyboard** will break many keys. The BR ABNT2 layout expects a 107-key physical keyboard with extra keys that US keyboards don't have.
+
+**Symptoms:** `Shift+/` produces `:` instead of `?`, other punctuation keys are wrong.
+
+**Fix:** Remove `br` from your layout list. This script uses `us` with variant `intl` (US International with dead keys), which provides full cedilla support through XCompose and fcitx5 without needing the BR layout:
+
+```conf
+# Hyprland input.conf — correct
+kb_layout = us
+kb_variant = intl
+
+# WRONG — do not add br as a second layout with a US physical keyboard
+# kb_layout = us,br
+```
+
+If you accidentally toggled to the BR layout, switch back immediately:
+
+```bash
+# Hyprland
+hyprctl switchxkblayout <keyboard-name> 0
+
+# Find your keyboard name with:
+hyprctl devices | grep -A1 "Keyboard"
+```
+
 ### XWayland apps still show ć
 
 XWayland apps use the X11 Compose table. The script installs `~/.XCompose` which should cover this, but some apps cache the old table. Try:

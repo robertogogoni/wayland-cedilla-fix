@@ -332,18 +332,60 @@ install_compositor_hyprland() {
         # If neither exists, use envs.conf (will be created)
     fi
 
-    local env_block
-    env_block="$(printf '%s\n%s\n%s\n%s\n%s' \
-        'env = INPUT_METHOD,fcitx' \
-        'env = GTK_IM_MODULE,fcitx' \
-        'env = QT_IM_MODULE,fcitx' \
-        'env = XMODIFIERS,@im=fcitx' \
-        'env = SDL_IM_MODULE,fcitx')"
+    local env_vars=(
+        'env = INPUT_METHOD,fcitx'
+        'env = GTK_IM_MODULE,fcitx'
+        'env = QT_IM_MODULE,fcitx'
+        'env = XMODIFIERS,@im=fcitx'
+        'env = SDL_IM_MODULE,fcitx'
+    )
 
-    info "  Configuring $(basename "$env_conf") with fcitx5 env vars ..."
-    backup_file "$env_conf"
-    merge_block "$env_conf" "$env_block" "hyprland-env"
-    info "  Hyprland environment variables configured"
+    # Check if env vars already exist outside our managed block to avoid duplicates
+    if [[ -f "$env_conf" ]]; then
+        local already_set=0
+        for var in "${env_vars[@]}"; do
+            # Strip leading 'env = ' to get VAR,value
+            local var_name="${var#env = }"
+            var_name="${var_name%%,*}"
+            # Count occurrences outside our BEGIN/END block
+            local outside_count
+            outside_count=$(sed '/# BEGIN wayland-cedilla-fix:hyprland-env/,/# END wayland-cedilla-fix:hyprland-env/d' "$env_conf" \
+                | grep -cF "$var_name" 2>/dev/null || true)
+            if [[ "$outside_count" -gt 0 ]]; then
+                already_set=$((already_set + 1))
+            fi
+        done
+        if [[ "$already_set" -ge 4 ]]; then
+            info "  fcitx5 env vars already present in $(basename "$env_conf"); skipping to avoid duplicates"
+            # Still ensure our managed block is removed if it exists (cleanup)
+            if grep -qF "# BEGIN wayland-cedilla-fix:hyprland-env" "$env_conf" 2>/dev/null; then
+                if [[ "$DRY_RUN" -eq 1 ]]; then
+                    info "  Would remove redundant managed block from $(basename "$env_conf")"
+                else
+                    local tmp
+                    tmp="$(mktemp)"
+                    sed '/# BEGIN wayland-cedilla-fix:hyprland-env/,/# END wayland-cedilla-fix:hyprland-env/d' "$env_conf" > "$tmp"
+                    mv "$tmp" "$env_conf"
+                    info "  Removed redundant managed block from $(basename "$env_conf")"
+                fi
+            fi
+            # Jump to section C
+        else
+            local env_block
+            env_block="$(printf '%s\n' "${env_vars[@]}")"
+            info "  Configuring $(basename "$env_conf") with fcitx5 env vars ..."
+            backup_file "$env_conf"
+            merge_block "$env_conf" "$env_block" "hyprland-env"
+            info "  Hyprland environment variables configured"
+        fi
+    else
+        local env_block
+        env_block="$(printf '%s\n' "${env_vars[@]}")"
+        info "  Configuring $(basename "$env_conf") with fcitx5 env vars ..."
+        backup_file "$env_conf"
+        merge_block "$env_conf" "$env_block" "hyprland-env"
+        info "  Hyprland environment variables configured"
+    fi
 }
 
 install_compositor_sway() {
