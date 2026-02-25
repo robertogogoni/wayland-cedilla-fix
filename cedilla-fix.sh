@@ -1158,19 +1158,22 @@ verify_compose() {
         return 2  # signal: skip (not installed)
     fi
 
+    if [[ "$LOCALE" == "unknown" ]] || [[ -z "$LOCALE" ]]; then
+        return 2
+    fi
+
     local compose_output
-    compose_output=$(xkbcli compile-compose --locale "${LANG:-}" 2>/dev/null || true)
+    compose_output=$(xkbcli compile-compose --locale "$LOCALE" 2>/dev/null || true)
 
     if [[ -z "$compose_output" ]]; then
         return 1
     fi
 
     # Look for the cedilla mapping: <dead_acute> <c> should produce ç
-    if printf '%s\n' "$compose_output" | grep -q '<dead_acute>.*<c>' 2>/dev/null; then
-        # Verify it maps to cedilla (ç, U00E7, or ccedilla)
-        local match_line
-        match_line=$(printf '%s\n' "$compose_output" | grep '<dead_acute>.*<c>' || true)
-        if printf '%s\n' "$match_line" | grep -qi 'ccedilla\|U00[Ee]7\|ç' 2>/dev/null; then
+    local match_line
+    match_line=$(printf '%s\n' "$compose_output" | grep -i '<dead_acute>.*<c>' || true)
+    if [[ -n "$match_line" ]]; then
+        if printf '%s\n' "$match_line" | grep -qi 'ccedilla\|U00E7\|ç' 2>/dev/null; then
             return 0
         fi
     fi
