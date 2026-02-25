@@ -261,6 +261,174 @@ install_environment() {
     info "  Environment variables configured"
 }
 
+install_compositor_hyprland() {
+    info "  Configuring Hyprland ..."
+
+    # --- A) Set kb_variant to intl in input.conf ---
+    local input_conf="${HOME}/.config/hypr/input.conf"
+
+    if [[ ! -f "$input_conf" ]]; then
+        # File does not exist — create it with input { kb_variant = intl }
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            info "  Would create ${input_conf} with kb_variant = intl"
+        else
+            ensure_dir "$input_conf"
+            printf 'input {\n    kb_variant = intl\n}\n' > "$input_conf"
+            info "  Created input.conf with kb_variant = intl"
+        fi
+    else
+        # File exists — check for kb_variant
+        if grep -q 'kb_variant' "$input_conf"; then
+            # kb_variant line exists — check if already set to intl
+            if grep -q 'kb_variant\s*=\s*intl' "$input_conf"; then
+                info "  input.conf already has kb_variant = intl"
+            else
+                # Different value — replace with intl
+                backup_file "$input_conf"
+                if [[ "$DRY_RUN" -eq 1 ]]; then
+                    info "  Would update kb_variant to intl in input.conf"
+                else
+                    sed -i 's/kb_variant\s*=.*/kb_variant = intl/' "$input_conf"
+                    info "  Updated kb_variant to intl in input.conf"
+                fi
+            fi
+        else
+            # No kb_variant line — append inside existing input { } block or add one
+            backup_file "$input_conf"
+            if grep -q 'input\s*{' "$input_conf"; then
+                # input block exists but no kb_variant — insert after opening brace
+                if [[ "$DRY_RUN" -eq 1 ]]; then
+                    info "  Would add kb_variant = intl to existing input block"
+                else
+                    sed -i '/input\s*{/a\    kb_variant = intl' "$input_conf"
+                    info "  Added kb_variant = intl to existing input block"
+                fi
+            else
+                # No input block at all — append a new one
+                if [[ "$DRY_RUN" -eq 1 ]]; then
+                    info "  Would append input { kb_variant = intl } to input.conf"
+                else
+                    printf '\ninput {\n    kb_variant = intl\n}\n' >> "$input_conf"
+                    info "  Appended input { kb_variant = intl } to input.conf"
+                fi
+            fi
+        fi
+    fi
+
+    # --- B) Merge fcitx5 env vars into envs.conf or hyprland.conf ---
+    local env_conf="${HOME}/.config/hypr/envs.conf"
+
+    if [[ ! -f "$env_conf" ]]; then
+        # envs.conf does not exist — fall back to hyprland.conf
+        local hypr_conf="${HOME}/.config/hypr/hyprland.conf"
+        if [[ -f "$hypr_conf" ]]; then
+            env_conf="$hypr_conf"
+        fi
+        # If neither exists, use envs.conf (will be created)
+    fi
+
+    local env_block
+    env_block="$(printf '%s\n%s\n%s\n%s\n%s' \
+        'env = INPUT_METHOD,fcitx' \
+        'env = GTK_IM_MODULE,fcitx' \
+        'env = QT_IM_MODULE,fcitx' \
+        'env = XMODIFIERS,@im=fcitx' \
+        'env = SDL_IM_MODULE,fcitx')"
+
+    info "  Configuring $(basename "$env_conf") with fcitx5 env vars ..."
+    backup_file "$env_conf"
+    merge_block "$env_conf" "$env_block" "hyprland-env"
+    info "  Hyprland environment variables configured"
+}
+
+install_compositor_sway() {
+    info "  Configuring Sway ..."
+
+    local sway_config="${HOME}/.config/sway/config"
+    local sway_drop_dir="${HOME}/.config/sway/config.d"
+    local target_file=""
+
+    # Determine target: prefer drop-in directory if it exists
+    if [[ -d "$sway_drop_dir" ]]; then
+        target_file="${sway_drop_dir}/cedilla-fix.conf"
+    else
+        target_file="$sway_config"
+    fi
+
+    # Check if xkb_variant intl is already configured somewhere
+    local already_set=0
+    if [[ -f "$sway_config" ]]; then
+        if grep -q 'xkb_variant\s\+intl' "$sway_config"; then
+            already_set=1
+        fi
+    fi
+    if [[ "$already_set" -eq 0 ]] && [[ -d "$sway_drop_dir" ]]; then
+        local drop_file
+        for drop_file in "${sway_drop_dir}"/*.conf; do
+            if [[ -f "$drop_file" ]]; then
+                if grep -q 'xkb_variant\s\+intl' "$drop_file"; then
+                    already_set=1
+                    break
+                fi
+            fi
+        done
+    fi
+
+    if [[ "$already_set" -eq 1 ]]; then
+        info "  Sway already has xkb_variant intl configured"
+        return 0
+    fi
+
+    local kb_block
+    kb_block="input type:keyboard xkb_variant intl"
+
+    info "  Writing keyboard variant to $(basename "$target_file") ..."
+    backup_file "$target_file"
+    merge_block "$target_file" "$kb_block" "sway-keyboard"
+    info "  Sway keyboard variant configured"
+}
+
+install_compositor_generic() {
+    case "$COMPOSITOR" in
+        labwc)
+            info "  Configuring labwc ..."
+            local labwc_env="${HOME}/.config/labwc/environment"
+
+            local env_block
+            env_block="$(printf '%s\n%s\n%s\n%s\n%s' \
+                'INPUT_METHOD=fcitx' \
+                'GTK_IM_MODULE=fcitx' \
+                'QT_IM_MODULE=fcitx' \
+                'XMODIFIERS=@im=fcitx' \
+                'SDL_IM_MODULE=fcitx')"
+
+            info "  Writing fcitx5 env vars to labwc environment ..."
+            backup_file "$labwc_env"
+            merge_block "$labwc_env" "$env_block" "labwc-env"
+            info "  labwc environment configured"
+            ;;
+        river)
+            info "  River detected — keyboard variant must be set at runtime."
+            info "  Add this to your river init script:"
+            info "    riverctl keyboard-layout -variant intl us"
+            info "  Environment variables from environment.d will still apply."
+            ;;
+        *)
+            info "  Compositor '${COMPOSITOR}' does not have built-in configuration support."
+            info "  The environment.d variables set by this tool will work for most GTK/Qt apps."
+            info "  If your compositor supports keyboard variant configuration, set it to 'intl' manually."
+            ;;
+    esac
+}
+
+install_compositor() {
+    case "$COMPOSITOR" in
+        hyprland) install_compositor_hyprland ;;
+        sway)     install_compositor_sway ;;
+        *)        install_compositor_generic ;;
+    esac
+}
+
 # -----------------------------------------------------------------------------
 # Animation Functions
 # -----------------------------------------------------------------------------
