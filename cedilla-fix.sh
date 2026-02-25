@@ -60,6 +60,80 @@ info() {
     printf "%s\n" "$*"
 }
 
+# -----------------------------------------------------------------------------
+# Animation Functions
+# -----------------------------------------------------------------------------
+
+print_header() {
+    local w=54
+    local title="wayland-cedilla-fix  v${VERSION}"
+    local sub="Fix cedilla on Wayland -- one command, all apps"
+    if [[ "$HAS_MOTION" -eq 1 ]]; then
+        printf "  ╔%${w}s╗\n" | tr ' ' '═'
+        printf "  ║%*s%s%*s║\n" $(( (w - ${#title}) / 2 )) "" "$title" $(( (w + 1 - ${#title}) / 2 )) ""
+        printf "  ║%*s%s%*s║\n" $(( (w - ${#sub}) / 2 )) "" "$sub" $(( (w + 1 - ${#sub}) / 2 )) ""
+        printf "  ╚%${w}s╝\n" | tr ' ' '═'
+    else
+        printf "%s\n" "$title"
+        printf "%s\n" "$sub"
+    fi
+    printf "\n"
+}
+
+spinner() {
+    local pid=$1 msg=$2
+    local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  ${YELLOW}%s${RESET} %s" "${frames:i%10:1}" "$msg"
+        i=$((i + 1))
+        sleep 0.08
+    done
+    printf "\r"
+}
+
+progress_dots() {
+    local pid=$1 label=$2 step=${3:-""} total=${4:-""}
+    local max=13
+    local prefix=""
+    [[ -n "$step" ]] && prefix="[${step}/${total}] "
+
+    if [[ "$HAS_MOTION" -eq 0 ]]; then
+        wait "$pid" 2>/dev/null
+        local rc=$?
+        printf "  %s%s   done\n" "$prefix" "$label"
+        return $rc
+    fi
+
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        i=$(( (i + 1) % (max + 1) ))
+        printf "\r  %s%s   %-*s" "$prefix" "$label" "$max" "$(printf '%*s' "$i" '' | tr ' ' '·')"
+        sleep 0.06
+    done
+    printf "\r  %s%s   %-*s ${GREEN}done ✓${RESET}\n" "$prefix" "$label" "$max" "·············"
+}
+
+run_with_spinner() {
+    local msg=$1; shift
+    "$@" &
+    local pid=$!
+    if [[ "$HAS_MOTION" -eq 1 ]]; then
+        spinner "$pid" "$msg"
+    fi
+    wait "$pid"
+    return $?
+}
+
+run_with_dots() {
+    local label=$1 step=$2 total=$3; shift 3
+    "$@" &
+    local pid=$!
+    progress_dots "$pid" "$label" "$step" "$total"
+    wait "$pid"
+    return $?
+}
+
 usage() {
     cat <<EOF
 ${BOLD}wayland-cedilla-fix${RESET} v${VERSION}
@@ -130,6 +204,11 @@ parse_args() {
 # -----------------------------------------------------------------------------
 
 parse_args "$@"
+
+# Show header for install and check modes (not --help which already exited)
+if [[ "$MODE" != "uninstall" ]] || [[ "$DRY_RUN" -eq 1 ]]; then
+    print_header
+fi
 
 # Detection, install, verify, and uninstall functions
 # will be added in subsequent tasks.
