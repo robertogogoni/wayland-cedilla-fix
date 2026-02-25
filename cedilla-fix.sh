@@ -429,6 +429,106 @@ install_compositor() {
     esac
 }
 
+install_fcitx5() {
+    if [[ -z "${IM_FRAMEWORK:-}" || "$IM_FRAMEWORK" != "fcitx5" ]]; then
+        warn "fcitx5 is not the detected input framework (got '${IM_FRAMEWORK:-none}'); skipping fcitx5 profile configuration"
+        return 0
+    fi
+
+    local profile="${HOME}/.config/fcitx5/profile"
+
+    info "  Configuring fcitx5 profile ..."
+
+    # Check if already configured
+    if [[ -f "$profile" ]]; then
+        if grep -q 'keyboard-us-intl' "$profile"; then
+            info "  fcitx5 profile already has keyboard-us-intl"
+            return 0
+        fi
+    fi
+
+    backup_file "$profile"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "  Would kill fcitx5, write profile with keyboard-us-intl, and restart fcitx5"
+        return 0
+    fi
+
+    # Kill fcitx5 with SIGKILL to prevent it from overwriting the profile on
+    # graceful shutdown. The || true guard prevents set -e from exiting when
+    # no fcitx5 process is found.
+    pkill -9 -x fcitx5 2>/dev/null || true
+    sleep 0.3
+
+    ensure_dir "$profile"
+
+    cat > "$profile" << 'EOF'
+[Groups/0]
+# Group Name
+Name=Default
+# Layout
+Default Layout=us-intl
+# Default Input Method
+DefaultIM=keyboard-us-intl
+
+[Groups/0/Items/0]
+# Name
+Name=keyboard-us-intl
+# Layout
+Layout=
+
+[GroupOrder]
+0=Default
+EOF
+
+    info "  Wrote fcitx5 profile with keyboard-us-intl"
+
+    # Restart fcitx5 in the background. The subshell + || true guard handles
+    # setups where the initial fork exits non-zero.
+    ( fcitx5 -d --replace &>/dev/null & ) || true
+    info "  Restarted fcitx5"
+}
+
+install_browsers() {
+    if [[ ${#BROWSERS[@]} -eq 0 ]]; then
+        info "  No Chromium-based browsers detected; skipping browser flag configuration"
+        return 0
+    fi
+
+    local browser flags_file
+
+    for browser in "${BROWSERS[@]}"; do
+        case "$browser" in
+            chromium)  flags_file="${HOME}/.config/chromium-flags.conf" ;;
+            brave)     flags_file="${HOME}/.config/brave-flags.conf" ;;
+            chrome)    flags_file="${HOME}/.config/chrome-flags.conf" ;;
+            electron)  flags_file="${HOME}/.config/electron-flags.conf" ;;
+            *)
+                warn "Unknown browser '${browser}'; skipping"
+                continue
+                ;;
+        esac
+
+        info "  Configuring ${browser} ..."
+        backup_file "$flags_file"
+
+        if merge_line "$flags_file" "--enable-wayland-ime"; then
+            info "  Added --enable-wayland-ime to $(basename "$flags_file")"
+        else
+            info "  $(basename "$flags_file") already has --enable-wayland-ime"
+        fi
+
+        # Electron also needs the ozone platform hint for native Wayland
+        if [[ "$browser" == "electron" ]]; then
+            if merge_line "$flags_file" "--ozone-platform-hint=wayland"; then
+                info "  Added --ozone-platform-hint=wayland to $(basename "$flags_file")"
+            else
+                info "  $(basename "$flags_file") already has --ozone-platform-hint=wayland"
+            fi
+        fi
+    done
+}
+
 # -----------------------------------------------------------------------------
 # Animation Functions
 # -----------------------------------------------------------------------------
