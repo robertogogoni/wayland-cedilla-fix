@@ -503,16 +503,11 @@ install_browsers() {
     local browser flags_file
 
     for browser in "${BROWSERS[@]}"; do
-        case "$browser" in
-            chromium)  flags_file="${HOME}/.config/chromium-flags.conf" ;;
-            brave)     flags_file="${HOME}/.config/brave-flags.conf" ;;
-            chrome)    flags_file="${HOME}/.config/chrome-flags.conf" ;;
-            electron)  flags_file="${HOME}/.config/electron-flags.conf" ;;
-            *)
-                warn "Unknown browser '${browser}'; skipping"
-                continue
-                ;;
-        esac
+        flags_file=$(browser_flags_file "$browser")
+        if [[ -z "$flags_file" ]]; then
+            warn "Unknown browser '${browser}'; skipping"
+            continue
+        fi
 
         info "  Configuring ${browser} ..."
         backup_file "$flags_file"
@@ -945,6 +940,9 @@ browser_flags_file() {
 # array to one entry.
 install_single_browser() {
     local browser="$1"
+    # Save/restore is defensive: run_with_dots backgrounds us in a subshell,
+    # so BROWSERS mutations are isolated, but this protects against future
+    # refactors that might run install steps synchronously.
     local saved_browsers=("${BROWSERS[@]}")
     BROWSERS=("$browser")
     install_browsers
@@ -1088,7 +1086,7 @@ show_plan() {
     printf "\n  Backups saved to %s\n" "$BACKUP_DIR"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        printf "\n  ${BOLD}Dry run — no changes applied.${RESET}\n"
+        printf "\n  %bDry run -- no changes applied.%b\n" "$BOLD" "$RESET"
         exit 0
     fi
 
@@ -1142,6 +1140,8 @@ run_install() {
         fi
         executed=$((executed + 1))
         # shellcheck disable=SC2086
+        # Intentional word-split: $func may be "install_single_browser chromium".
+        # Safe because all function names and arguments are hardcoded single words.
         run_with_dots "${PLAN_STEPS[$i]}" "$executed" "$real_total" $func
     done
 
