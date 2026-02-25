@@ -1149,6 +1149,124 @@ run_install() {
 }
 
 # -----------------------------------------------------------------------------
+# Verification Functions
+# -----------------------------------------------------------------------------
+
+verify_compose() {
+    # Check if xkbcli is available
+    if ! command -v xkbcli >/dev/null 2>&1; then
+        return 2  # signal: skip (not installed)
+    fi
+
+    local compose_output
+    compose_output=$(xkbcli compile-compose --locale "${LANG:-}" 2>/dev/null || true)
+
+    if [[ -z "$compose_output" ]]; then
+        return 1
+    fi
+
+    # Look for the cedilla mapping: <dead_acute> <c> should produce ç
+    if printf '%s\n' "$compose_output" | grep -q '<dead_acute>.*<c>' 2>/dev/null; then
+        # Verify it maps to cedilla (ç, U00E7, or ccedilla)
+        local match_line
+        match_line=$(printf '%s\n' "$compose_output" | grep '<dead_acute>.*<c>' || true)
+        if printf '%s\n' "$match_line" | grep -qi 'ccedilla\|U00[Ee]7\|ç' 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+verify_keyboard() {
+    case "$COMPOSITOR" in
+        hyprland)
+            local hypr_output
+            hypr_output=$(hyprctl -j devices 2>/dev/null || true)
+            if [[ -z "$hypr_output" ]]; then
+                return 1
+            fi
+            if printf '%s\n' "$hypr_output" | grep -q '"variant".*intl' 2>/dev/null; then
+                return 0
+            fi
+            return 1
+            ;;
+        sway)
+            local sway_output
+            sway_output=$(swaymsg -t get_inputs 2>/dev/null || true)
+            if [[ -z "$sway_output" ]]; then
+                return 1
+            fi
+            if printf '%s\n' "$sway_output" | grep -q '"xkb_variant".*intl' 2>/dev/null; then
+                return 0
+            fi
+            return 1
+            ;;
+        *)
+            # river, labwc, generic-wayland, unknown: cannot verify live
+            return 2  # signal: skip
+            ;;
+    esac
+}
+
+run_verify() {
+    printf "  ── Verify ────────────────────────────────────────────\n"
+    printf "\n"
+
+    # --- Compose table check ---
+    local compose_result=0
+    verify_compose || compose_result=$?
+
+    if [[ "$compose_result" -eq 0 ]]; then
+        printf "  ${GREEN}▸${RESET} xkbcli compose check   dead_acute + c → ç    ${GREEN}✓${RESET}\n"
+    elif [[ "$compose_result" -eq 2 ]]; then
+        printf "  ${YELLOW}▸${RESET} xkbcli compose check   (xkbcli not installed) ${YELLOW}—${RESET}\n"
+    else
+        printf "  ${YELLOW}▸${RESET} xkbcli compose check   cedilla mapping        ${YELLOW}?${RESET}\n"
+    fi
+
+    # --- Keyboard variant check ---
+    local kb_result=0
+    verify_keyboard || kb_result=$?
+
+    if [[ "$kb_result" -eq 0 ]]; then
+        printf "  ${GREEN}▸${RESET} Keyboard variant        us-intl (dead keys)   ${GREEN}✓${RESET}\n"
+    elif [[ "$kb_result" -eq 2 ]]; then
+        printf "  ${YELLOW}▸${RESET} Keyboard variant        verify after logout   ${YELLOW}—${RESET}\n"
+    else
+        printf "  ${YELLOW}▸${RESET} Keyboard variant        not yet active        ${YELLOW}—${RESET}\n"
+    fi
+
+    printf "\n"
+}
+
+print_success() {
+    local lines=()
+    lines+=("  ══════════════════════════════════════════════════════")
+    lines+=("  ${GREEN}✓${RESET} ${BOLD}Done!${RESET} Log out and back in, then test: ${BOLD}' + c → ç${RESET}")
+    lines+=("")
+    lines+=("  Uninstall anytime:  ${BOLD}cedilla-fix.sh --uninstall${RESET}")
+    lines+=("  Verify anytime:     ${BOLD}cedilla-fix.sh --check${RESET}")
+    lines+=("  ══════════════════════════════════════════════════════")
+
+    if [[ "$HAS_MOTION" -eq 1 ]]; then
+        sleep 0.4
+        local line
+        for line in "${lines[@]}"; do
+            printf '%b\n' "$line"
+            sleep 0.1
+        done
+    else
+        local line
+        for line in "${lines[@]}"; do
+            printf '%b\n' "$line"
+        done
+    fi
+
+    printf "\n"
+}
+
+# -----------------------------------------------------------------------------
 # Main Entry Point
 # -----------------------------------------------------------------------------
 
@@ -1169,6 +1287,8 @@ if [[ "$MODE" == "install" ]]; then
     show_plan
     confirm_or_exit
     run_install
+    run_verify
+    print_success
 fi
 
-# Check and uninstall modes will be added in subsequent tasks.
+# Check and uninstall modes handled by subsequent tasks.
