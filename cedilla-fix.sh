@@ -54,6 +54,11 @@ KB_VARIANT=""
 KB_NEEDS_FIX=0
 BROWSERS=()
 
+# Plan state (populated by show_plan)
+PLAN_TOTAL=0
+PLAN_STEPS=()
+PLAN_FUNCTIONS=()
+
 # -----------------------------------------------------------------------------
 # Utility Functions
 # -----------------------------------------------------------------------------
@@ -108,7 +113,7 @@ merge_line() {
 
     # Check if line already exists
     if [[ -f "$file" ]]; then
-        if grep -qF "$line" "$file"; then
+        if grep -qF -- "$line" "$file"; then
             return 1
         fi
     fi
@@ -918,6 +923,224 @@ parse_args() {
 }
 
 # -----------------------------------------------------------------------------
+# Plan, Confirmation & Install Orchestration
+# -----------------------------------------------------------------------------
+
+# browser_flags_file <browser_name>
+# Return the flags file path for a given browser. Used by show_plan and
+# install_single_browser to avoid duplicating the mapping.
+browser_flags_file() {
+    local browser="$1"
+    case "$browser" in
+        chromium)  printf '%s' "${HOME}/.config/chromium-flags.conf" ;;
+        brave)     printf '%s' "${HOME}/.config/brave-flags.conf" ;;
+        chrome)    printf '%s' "${HOME}/.config/chrome-flags.conf" ;;
+        electron)  printf '%s' "${HOME}/.config/electron-flags.conf" ;;
+        *)         printf '%s' "" ;;
+    esac
+}
+
+# install_single_browser <browser_name>
+# Install flags for a single browser by temporarily narrowing the BROWSERS
+# array to one entry.
+install_single_browser() {
+    local browser="$1"
+    local saved_browsers=("${BROWSERS[@]}")
+    BROWSERS=("$browser")
+    install_browsers
+    BROWSERS=("${saved_browsers[@]}")
+}
+
+show_plan() {
+    local step=0
+    PLAN_STEPS=()
+    PLAN_FUNCTIONS=()
+
+    # Collect plan entries into parallel arrays: paths, actions, descriptions,
+    # step labels, and function names.
+    local plan_paths=()
+    local plan_actions=()
+    local plan_descs=()
+
+    # --- XCompose override (always shown) ---
+    local xcompose_file="${HOME}/.XCompose"
+    local xcompose_action="create"
+    if [[ -f "$xcompose_file" ]]; then
+        xcompose_action="modify"
+    fi
+    plan_paths+=("~/.XCompose")
+    plan_actions+=("$xcompose_action")
+    plan_descs+=("dead_acute + c → ç")
+    PLAN_STEPS+=("XCompose override")
+    PLAN_FUNCTIONS+=("install_xcompose")
+
+    # --- Compositor dead keys (hyprland or sway only) ---
+    if [[ "$COMPOSITOR" == "hyprland" ]]; then
+        plan_paths+=("hypr/input.conf")
+        plan_actions+=("modify")
+        plan_descs+=("kb_variant → intl")
+        PLAN_STEPS+=("Hyprland dead keys")
+        PLAN_FUNCTIONS+=("install_compositor")
+    elif [[ "$COMPOSITOR" == "sway" ]]; then
+        local sway_target="sway/config"
+        if [[ -d "${HOME}/.config/sway/config.d" ]]; then
+            sway_target="sway/config.d/cedilla-fix.conf"
+        fi
+        plan_paths+=("$sway_target")
+        plan_actions+=("modify")
+        plan_descs+=("xkb_variant → intl")
+        PLAN_STEPS+=("Sway dead keys")
+        PLAN_FUNCTIONS+=("install_compositor")
+    fi
+
+    # --- Compositor env vars (hyprland or labwc only) ---
+    if [[ "$COMPOSITOR" == "hyprland" ]]; then
+        local env_conf="hypr/envs.conf"
+        if [[ ! -f "${HOME}/.config/hypr/envs.conf" ]]; then
+            if [[ -f "${HOME}/.config/hypr/hyprland.conf" ]]; then
+                env_conf="hypr/hyprland.conf"
+            fi
+        fi
+        plan_paths+=("$env_conf")
+        plan_actions+=("modify")
+        plan_descs+=("fcitx5 env vars")
+        PLAN_STEPS+=("Hyprland env vars")
+        PLAN_FUNCTIONS+=("_skip_")
+    elif [[ "$COMPOSITOR" == "labwc" ]]; then
+        plan_paths+=("labwc/environment")
+        plan_actions+=("modify")
+        plan_descs+=("fcitx5 env vars")
+        PLAN_STEPS+=("labwc env vars")
+        PLAN_FUNCTIONS+=("install_compositor")
+    fi
+
+    # For Hyprland, the compositor step above handles both dead keys AND env
+    # vars in a single install_compositor_hyprland call. Mark the env vars
+    # step so run_install skips it (already executed).
+    # We use "_skip_" as a sentinel value in PLAN_FUNCTIONS.
+
+    # --- Session env vars (environment.d — always shown) ---
+    local env_d_file="${HOME}/.config/environment.d/cedilla.conf"
+    local env_d_action="create"
+    if [[ -f "$env_d_file" ]]; then
+        env_d_action="modify"
+    fi
+    plan_paths+=("environment.d/cedilla.conf")
+    plan_actions+=("$env_d_action")
+    plan_descs+=("IM env vars for all apps")
+    PLAN_STEPS+=("Session env vars")
+    PLAN_FUNCTIONS+=("install_environment")
+
+    # --- fcitx5 profile (only if detected) ---
+    if [[ "$IM_FRAMEWORK" == "fcitx5" ]]; then
+        plan_paths+=("fcitx5/profile")
+        plan_actions+=("modify")
+        plan_descs+=("keyboard-us-intl layout")
+        PLAN_STEPS+=("fcitx5 profile")
+        PLAN_FUNCTIONS+=("install_fcitx5")
+    fi
+
+    # --- Browser flags (one per browser) ---
+    local browser
+    for browser in "${BROWSERS[@]}"; do
+        local flags_file
+        flags_file=$(browser_flags_file "$browser")
+        if [[ -z "$flags_file" ]]; then
+            continue
+        fi
+        local flags_basename
+        flags_basename=$(basename "$flags_file")
+        local browser_action="create"
+        if [[ -f "$flags_file" ]]; then
+            browser_action="modify"
+        fi
+        plan_paths+=("$flags_basename")
+        plan_actions+=("$browser_action")
+        plan_descs+=("--enable-wayland-ime")
+        PLAN_STEPS+=("${browser} flags")
+        PLAN_FUNCTIONS+=("install_single_browser ${browser}")
+    done
+
+    PLAN_TOTAL=${#PLAN_STEPS[@]}
+
+    # --- Print the plan ---
+    printf "  ── Plan ──────────────────────────────────────────────\n"
+    printf "  The following changes will be applied:\n\n"
+
+    local i
+    for i in $(seq 0 $((PLAN_TOTAL - 1))); do
+        local action_color=""
+        if [[ "$HAS_COLOR" -eq 1 ]]; then
+            if [[ "${plan_actions[$i]}" == "create" ]]; then
+                action_color="$GREEN"
+            else
+                action_color="$YELLOW"
+            fi
+        fi
+        printf "  %2d. %-25s %b%-8s%b %s\n" \
+            "$((i + 1))" \
+            "${plan_paths[$i]}" \
+            "$action_color" \
+            "${plan_actions[$i]}" \
+            "$RESET" \
+            "${plan_descs[$i]}"
+    done
+
+    printf "\n  Backups saved to %s\n" "$BACKUP_DIR"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf "\n  ${BOLD}Dry run — no changes applied.${RESET}\n"
+        exit 0
+    fi
+
+    printf "\n  Apply changes? [Y/n] "
+}
+
+confirm_or_exit() {
+    if [[ "$FORCE" -eq 1 ]]; then
+        return 0
+    fi
+
+    local reply=""
+    read -r -n 1 reply
+    printf "\n"
+
+    # Default (empty / Enter) is yes
+    if [[ -z "$reply" ]]; then
+        return 0
+    fi
+
+    case "$reply" in
+        [Yy]) return 0 ;;
+        *)
+            printf "  Aborted.\n"
+            exit 1
+            ;;
+    esac
+}
+
+run_install() {
+    printf "  ── Applying ──────────────────────────────────────────\n"
+    printf "\n"
+
+    local i
+    for i in $(seq 0 $((PLAN_TOTAL - 1))); do
+        local func="${PLAN_FUNCTIONS[$i]}"
+
+        # Skip sentinel entries (e.g., Hyprland env vars already handled by
+        # install_compositor_hyprland in the dead keys step).
+        if [[ "$func" == "_skip_" ]]; then
+            continue
+        fi
+
+        # shellcheck disable=SC2086
+        run_with_dots "${PLAN_STEPS[$i]}" "$((i + 1))" "$PLAN_TOTAL" $func
+    done
+
+    printf "\n"
+}
+
+# -----------------------------------------------------------------------------
 # Main Entry Point
 # -----------------------------------------------------------------------------
 
@@ -933,4 +1156,11 @@ if [[ "$MODE" == "install" ]] || [[ "$MODE" == "check" ]]; then
     run_detection
 fi
 
-# Install, verify, and uninstall logic will be added in subsequent tasks.
+# Dispatch based on mode
+if [[ "$MODE" == "install" ]]; then
+    show_plan
+    confirm_or_exit
+    run_install
+fi
+
+# Check and uninstall modes will be added in subsequent tasks.
