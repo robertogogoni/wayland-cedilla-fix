@@ -43,6 +43,17 @@ DRY_RUN=0
 FORCE=0
 MODE="install"
 
+# Detection results (set by detect_* functions)
+COMPOSITOR=""
+COMPOSITOR_VERSION=""
+IM_FRAMEWORK=""
+IM_VERSION=""
+SESSION_TYPE=""
+LOCALE=""
+KB_VARIANT=""
+KB_NEEDS_FIX=0
+BROWSERS=()
+
 # -----------------------------------------------------------------------------
 # Utility Functions
 # -----------------------------------------------------------------------------
@@ -134,6 +145,255 @@ run_with_dots() {
     return $?
 }
 
+# -----------------------------------------------------------------------------
+# Detection Functions
+# -----------------------------------------------------------------------------
+
+detect_compositor() {
+    local output=""
+
+    # Hyprland
+    if output=$(hyprctl version 2>/dev/null); then
+        COMPOSITOR="hyprland"
+        COMPOSITOR_VERSION=$(printf '%s\n' "$output" | grep -oP 'v\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+        [[ -z "$COMPOSITOR_VERSION" ]] && COMPOSITOR_VERSION=$(printf '%s\n' "$output" | head -1 | sed 's/.*[vV]//' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)
+        return 0
+    fi
+
+    # Sway
+    if output=$(swaymsg -t get_version 2>/dev/null); then
+        COMPOSITOR="sway"
+        COMPOSITOR_VERSION=$(printf '%s\n' "$output" | grep -oP '"human_readable"\s*:\s*"\K[^"]+' | head -1 || true)
+        [[ -z "$COMPOSITOR_VERSION" ]] && COMPOSITOR_VERSION=$(printf '%s\n' "$output" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+        return 0
+    fi
+
+    # River
+    if pgrep -x river >/dev/null 2>&1; then
+        COMPOSITOR="river"
+        COMPOSITOR_VERSION=$(river --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+        [[ -z "$COMPOSITOR_VERSION" ]] && COMPOSITOR_VERSION="unknown"
+        return 0
+    fi
+
+    # Labwc
+    if pgrep -x labwc >/dev/null 2>&1; then
+        COMPOSITOR="labwc"
+        COMPOSITOR_VERSION=$(labwc --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+        [[ -z "$COMPOSITOR_VERSION" ]] && COMPOSITOR_VERSION="unknown"
+        return 0
+    fi
+
+    # Generic Wayland (compositor running but not identified)
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+        COMPOSITOR="generic-wayland"
+        COMPOSITOR_VERSION=""
+        return 0
+    fi
+
+    # Fallback
+    COMPOSITOR="unknown"
+    COMPOSITOR_VERSION=""
+}
+
+detect_im() {
+    local output=""
+
+    # fcitx5
+    if output=$(fcitx5 --version 2>/dev/null); then
+        IM_FRAMEWORK="fcitx5"
+        IM_VERSION=$(printf '%s\n' "$output" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+        [[ -z "$IM_VERSION" ]] && IM_VERSION="unknown"
+        return 0
+    fi
+
+    # ibus
+    if output=$(ibus version 2>/dev/null); then
+        IM_FRAMEWORK="ibus"
+        IM_VERSION=$(printf '%s\n' "$output" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+        [[ -z "$IM_VERSION" ]] && IM_VERSION="unknown"
+        return 0
+    fi
+
+    # No input method framework found
+    IM_FRAMEWORK="none"
+    IM_VERSION=""
+}
+
+detect_session() {
+    if [[ "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
+        SESSION_TYPE="wayland"
+        return 0
+    fi
+
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+        SESSION_TYPE="wayland"
+        return 0
+    fi
+
+    if [[ "${XDG_SESSION_TYPE:-}" == "x11" ]]; then
+        SESSION_TYPE="x11"
+        return 0
+    fi
+
+    SESSION_TYPE="unknown"
+}
+
+detect_locale() {
+    LOCALE="${LANG:-}"
+
+    if [[ -z "$LOCALE" ]]; then
+        LOCALE=$(locale 2>/dev/null | grep '^LANG=' | cut -d= -f2 || true)
+    fi
+
+    if [[ -z "$LOCALE" ]]; then
+        LOCALE="unknown"
+    fi
+}
+
+detect_keyboard() {
+    local variant=""
+
+    case "$COMPOSITOR" in
+        hyprland)
+            local devices_json=""
+            if devices_json=$(hyprctl -j devices 2>/dev/null); then
+                # Extract active_keymap values and look for variant info
+                variant=$(printf '%s\n' "$devices_json" \
+                    | grep -oP '"active_keymap"\s*:\s*"\K[^"]+' \
+                    | head -1 || true)
+            fi
+            ;;
+        sway)
+            local inputs_json=""
+            if inputs_json=$(swaymsg -t get_inputs 2>/dev/null); then
+                variant=$(printf '%s\n' "$inputs_json" \
+                    | grep -oP '"xkb_active_layout_name"\s*:\s*"\K[^"]+' \
+                    | head -1 || true)
+            fi
+            ;;
+    esac
+
+    # Generic fallback: try setxkbmap and localectl
+    if [[ -z "$variant" ]]; then
+        variant=$(setxkbmap -query 2>/dev/null | grep -i 'variant' | awk '{print $2}' || true)
+    fi
+    if [[ -z "$variant" ]]; then
+        variant=$(localectl status 2>/dev/null | grep -i 'Variant' | awk -F: '{print $2}' | xargs || true)
+    fi
+
+    if [[ -z "$variant" ]]; then
+        KB_VARIANT="unknown"
+        KB_NEEDS_FIX=1
+        return 0
+    fi
+
+    # Normalize: check if the variant/keymap indicates an intl layout with dead keys
+    local variant_lower
+    variant_lower=$(printf '%s' "$variant" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$variant_lower" == *"intl"* ]] || [[ "$variant_lower" == *"dead"* ]]; then
+        KB_VARIANT="us-intl"
+        KB_NEEDS_FIX=0
+    else
+        KB_VARIANT="$variant"
+        KB_NEEDS_FIX=1
+    fi
+}
+
+detect_browsers() {
+    BROWSERS=()
+    command -v chromium   >/dev/null 2>&1 && BROWSERS+=("chromium")
+    command -v brave      >/dev/null 2>&1 && BROWSERS+=("brave")
+    command -v google-chrome-stable >/dev/null 2>&1 && BROWSERS+=("chrome")
+    command -v electron   >/dev/null 2>&1 && BROWSERS+=("electron")
+}
+
+print_detect_line() {
+    local label=$1 value=$2 status=$3
+    if [[ "$status" == "ok" ]]; then
+        printf "  ▸ %-14s %-30s ${GREEN}✓${RESET}\n" "$label" "$value"
+    else
+        printf "  ▸ %-14s %-30s ${YELLOW}⚠ %s${RESET}\n" "$label" "$value" "$status"
+    fi
+}
+
+run_detection() {
+    printf "  Detecting system...\n\n"
+
+    # --- Compositor ---
+    detect_compositor
+    local comp_display=""
+    if [[ -n "$COMPOSITOR_VERSION" ]]; then
+        comp_display="${COMPOSITOR} ${COMPOSITOR_VERSION}"
+    else
+        comp_display="$COMPOSITOR"
+    fi
+    if [[ "$COMPOSITOR" == "unknown" ]]; then
+        print_detect_line "Compositor" "$comp_display" "not detected"
+    else
+        print_detect_line "Compositor" "$comp_display" "ok"
+    fi
+    [[ "$HAS_MOTION" -eq 1 ]] && sleep 0.15
+
+    # --- Input Method ---
+    detect_im
+    local im_display=""
+    if [[ "$IM_FRAMEWORK" != "none" ]] && [[ -n "$IM_VERSION" ]]; then
+        im_display="${IM_FRAMEWORK} ${IM_VERSION}"
+    else
+        im_display="$IM_FRAMEWORK"
+    fi
+    if [[ "$IM_FRAMEWORK" == "none" ]]; then
+        print_detect_line "Input method" "$im_display" "not installed"
+    else
+        print_detect_line "Input method" "$im_display" "ok"
+    fi
+    [[ "$HAS_MOTION" -eq 1 ]] && sleep 0.15
+
+    # --- Session Type ---
+    detect_session
+    if [[ "$SESSION_TYPE" == "wayland" ]]; then
+        print_detect_line "Session" "Wayland" "ok"
+    elif [[ "$SESSION_TYPE" == "x11" ]]; then
+        print_detect_line "Session" "X11" "not wayland"
+    else
+        print_detect_line "Session" "$SESSION_TYPE" "unknown"
+    fi
+    [[ "$HAS_MOTION" -eq 1 ]] && sleep 0.15
+
+    # --- Locale ---
+    detect_locale
+    print_detect_line "Locale" "$LOCALE" "ok"
+    [[ "$HAS_MOTION" -eq 1 ]] && sleep 0.15
+
+    # --- Keyboard ---
+    detect_keyboard
+    if [[ "$KB_NEEDS_FIX" -eq 1 ]]; then
+        if [[ "$KB_VARIANT" == "unknown" ]]; then
+            print_detect_line "Keyboard" "$KB_VARIANT" "needs fix"
+        else
+            print_detect_line "Keyboard" "${KB_VARIANT} (no dead keys!)" "needs fix"
+        fi
+    else
+        print_detect_line "Keyboard" "$KB_VARIANT" "ok"
+    fi
+    [[ "$HAS_MOTION" -eq 1 ]] && sleep 0.15
+
+    # --- Browsers ---
+    detect_browsers
+    if [[ ${#BROWSERS[@]} -gt 0 ]]; then
+        local browser_list
+        browser_list=$(printf '%s, ' "${BROWSERS[@]}")
+        browser_list="${browser_list%, }"  # trim trailing ", "
+        print_detect_line "Browsers" "$browser_list" "ok"
+    else
+        print_detect_line "Browsers" "none found" "no browsers"
+    fi
+
+    printf "\n"
+}
+
 usage() {
     cat <<EOF
 ${BOLD}wayland-cedilla-fix${RESET} v${VERSION}
@@ -210,5 +470,9 @@ if [[ "$MODE" != "uninstall" ]] || [[ "$DRY_RUN" -eq 1 ]]; then
     print_header
 fi
 
-# Detection, install, verify, and uninstall functions
-# will be added in subsequent tasks.
+# Run detection for install and check modes
+if [[ "$MODE" == "install" ]] || [[ "$MODE" == "check" ]]; then
+    run_detection
+fi
+
+# Install, verify, and uninstall logic will be added in subsequent tasks.
