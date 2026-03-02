@@ -1,6 +1,7 @@
 # wayland-cedilla-fix
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![AUR](https://img.shields.io/aur/version/wayland-cedilla-fix?label=AUR)](https://aur.archlinux.org/packages/wayland-cedilla-fix)
 [![GitHub Release](https://img.shields.io/github/v/release/robertogogoni/wayland-cedilla-fix)](https://github.com/robertogogoni/wayland-cedilla-fix/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/robertogogoni/wayland-cedilla-fix)](https://github.com/robertogogoni/wayland-cedilla-fix/stargazers)
 
