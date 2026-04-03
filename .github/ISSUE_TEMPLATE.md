@@ -17,6 +17,12 @@ about: Report a problem with the cedilla fix
 Paste the full output here
 ```
 
+## Output of `cedilla-fix --fix` (if attempted)
+
+```
+Paste the full output here (or "not attempted")
+```
+
 ## What happened
 
 Describe what you observed.

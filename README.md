@@ -77,6 +77,8 @@ The script also sets environment variables (`GTK_IM_MODULE`, `QT_IM_MODULE`, `XM
 | Chromium | ✅ | `--enable-wayland-ime` added to flags |
 | Brave | ✅ | `--enable-wayland-ime` added to flags |
 | Google Chrome | ✅ | `--enable-wayland-ime` added to flags |
+| Google Chrome Canary | ✅ | `--enable-wayland-ime` added to flags |
+| Vivaldi | ✅ | `--enable-wayland-ime` added to flags |
 | Electron apps | ✅ | `--enable-wayland-ime` added to flags |
 | Firefox | ✅ | Works natively (no flags needed) |
 
@@ -115,7 +117,15 @@ Shows exactly what would be changed without modifying any files. Useful to previ
 bash cedilla-fix.sh --check
 ```
 
-Runs diagnostics to show which components are configured correctly and which need fixing. Outputs pass/fail for each layer.
+Runs diagnostics to show which components are configured correctly and which need fixing. Checks 9 layers including config files, runtime systemd environment, fcitx5 process state, and Hyprland env block.
+
+### Quick Fix (runtime repair)
+
+```bash
+cedilla-fix --fix
+```
+
+Repairs runtime issues without a full reinstall: cleans conflicting environment files, injects env vars into the running session, re-injects wiped Hyprland env blocks, and restarts fcitx5. No logout needed.
 
 ### Uninstall
 
@@ -145,6 +155,7 @@ Usage: cedilla-fix.sh [OPTIONS]
 Options:
   --help        Show help and exit
   --check       Check current cedilla configuration status
+  --fix         Repair runtime env without full reinstall
   --uninstall   Revert to pre-install state from backup
   --dry-run     Show what would be done without making changes
   --force       Skip confirmation prompt
@@ -170,9 +181,34 @@ Then run the script again.
 
 ### Changes don't take effect immediately
 
-Some changes require a **logout and login** to activate:
-- Environment variables (`GTK_IM_MODULE`, etc.) are loaded at session start
-- Compositor config reloads may need a session restart
+As of v1.1.0, the installer activates environment variables immediately — no logout needed in most cases. If something still doesn't work, try:
+
+```bash
+cedilla-fix --fix    # Quick runtime repair
+```
+
+If that doesn't help, a logout/login will reload all session configs.
+
+### Cedilla broke after a system update
+
+System or compositor updates can wipe environment variables or reset configurations. Run the quick fix:
+
+```bash
+cedilla-fix --fix
+```
+
+This repairs the runtime environment without needing logout/login. If `--fix` doesn't help, run a full `cedilla-fix` to re-apply all layers.
+
+To diagnose what specifically broke:
+
+```bash
+cedilla-fix --check
+```
+
+Look for `✗` marks — common issues after updates:
+- **systemd XCOMPOSEFILE**: literal `~` or missing path
+- **fcitx5 process env**: stale environment from before the fix
+- **Hyprland envs.conf**: compositor update wiped the fcitx5 block
 
 ### Cedilla works in terminals but not in browsers
 

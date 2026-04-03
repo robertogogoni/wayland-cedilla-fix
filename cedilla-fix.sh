@@ -6,7 +6,7 @@ set -euo pipefail
 # https://github.com/robertogogoni/wayland-cedilla-fix
 # =============================================================================
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 BACKUP_DIR="${HOME}/.local/share/wayland-cedilla-fix/backup/$(date +%Y%m%d-%H%M%S)"
 
 # -----------------------------------------------------------------------------
