@@ -258,12 +258,73 @@ install_environment() {
         'QT_IM_MODULE=fcitx' \
         'XMODIFIERS=@im=fcitx' \
         'SDL_IM_MODULE=fcitx' \
-        "XCOMPOSEFILE=\${HOME}/.XCompose")"
+        "XCOMPOSEFILE=${HOME}/.XCompose")"
 
     info "  Configuring ~/.config/environment.d/cedilla.conf ..."
     backup_file "$env_file"
     merge_block "$env_file" "$block" "environment"
     info "  Environment variables configured"
+
+    # Remove conflicting IM vars from other environment.d files
+    cleanup_conflicting_env_files
+
+    # Also inject into running session so no logout is needed
+    activate_session_environment
+}
+
+cleanup_conflicting_env_files() {
+    local our_file="${HOME}/.config/environment.d/cedilla.conf"
+    local env_dir="${HOME}/.config/environment.d"
+
+    [[ ! -d "$env_dir" ]] && return 0
+
+    local f
+    for f in "${env_dir}"/*.conf; do
+        [[ "$f" == "$our_file" ]] && continue
+        [[ ! -f "$f" ]] && continue
+
+        if grep -qE '^(GTK_IM_MODULE|QT_IM_MODULE|XMODIFIERS|INPUT_METHOD|SDL_IM_MODULE|XCOMPOSEFILE)=' "$f" 2>/dev/null; then
+            local basename_f
+            basename_f=$(basename "$f")
+
+            if [[ "$DRY_RUN" -eq 1 ]]; then
+                info "  Would remove conflicting IM vars from ${basename_f}"
+                continue
+            fi
+
+            backup_file "$f"
+            sed -i '/^GTK_IM_MODULE=/d; /^QT_IM_MODULE=/d; /^XMODIFIERS=/d; /^INPUT_METHOD=/d; /^SDL_IM_MODULE=/d; /^XCOMPOSEFILE=/d' "$f"
+
+            if ! grep -qE '^\s*[^#[:space:]]' "$f" 2>/dev/null; then
+                rm "$f"
+                info "  Removed empty ${basename_f} (was duplicate of cedilla.conf)"
+            else
+                info "  Cleaned conflicting IM vars from ${basename_f}"
+            fi
+        fi
+    done
+}
+
+activate_session_environment() {
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "  Would inject IM env vars into running systemd session"
+        return 0
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        warn "systemctl not found; env vars will activate after logout/login"
+        return 0
+    fi
+
+    systemctl --user set-environment \
+        "INPUT_METHOD=fcitx" \
+        "GTK_IM_MODULE=fcitx" \
+        "QT_IM_MODULE=fcitx" \
+        "XMODIFIERS=@im=fcitx" \
+        "SDL_IM_MODULE=fcitx" \
+        "XCOMPOSEFILE=${HOME}/.XCompose" 2>/dev/null || true
+
+    info "  Injected env vars into running systemd session"
 }
 
 install_compositor_hyprland() {
@@ -476,6 +537,37 @@ install_compositor() {
     esac
 }
 
+# restart_fcitx5
+# Kill fcitx5 with SIGKILL (prevents profile overwrite on graceful shutdown),
+# then restart via systemd if managed, or raw fork as fallback.
+restart_fcitx5() {
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "  Would restart fcitx5"
+        return 0
+    fi
+
+    pkill -9 -x fcitx5 2>/dev/null || true
+    sleep 0.3
+
+    # Prefer systemd restart (inherits correct session env)
+    if command -v systemctl >/dev/null 2>&1; then
+        local unit
+        unit=$(systemctl --user list-units --type=service --all 2>/dev/null \
+            | grep -oP '\S*fcitx5?\S*\.service' | head -1 || true)
+
+        if [[ -n "$unit" ]]; then
+            systemctl --user restart "$unit" 2>/dev/null && {
+                info "  Restarted fcitx5 via systemd ($unit)"
+                return 0
+            }
+        fi
+    fi
+
+    # Fallback: raw fork
+    ( fcitx5 -d --replace &>/dev/null & ) || true
+    info "  Restarted fcitx5"
+}
+
 install_fcitx5() {
     if [[ -z "${IM_FRAMEWORK:-}" || "$IM_FRAMEWORK" != "fcitx5" ]]; then
         warn "fcitx5 is not the detected input framework (got '${IM_FRAMEWORK:-none}'); skipping fcitx5 profile configuration"
@@ -530,8 +622,18 @@ EOF
 
     info "  Wrote fcitx5 profile with keyboard-us-intl"
 
-    # Restart fcitx5 in the background. The subshell + || true guard handles
-    # setups where the initial fork exits non-zero.
+    # Restart fcitx5 (prefers systemd for correct env inheritance)
+    if command -v systemctl >/dev/null 2>&1; then
+        local unit
+        unit=$(systemctl --user list-units --type=service --all 2>/dev/null \
+            | grep -oP '\S*fcitx5?\S*\.service' | head -1 || true)
+        if [[ -n "$unit" ]]; then
+            systemctl --user restart "$unit" 2>/dev/null && {
+                info "  Restarted fcitx5 via systemd ($unit)"
+                return 0
+            }
+        fi
+    fi
     ( fcitx5 -d --replace &>/dev/null & ) || true
     info "  Restarted fcitx5"
 }
@@ -1390,10 +1492,7 @@ uninstall() {
         if [[ "$DRY_RUN" -eq 1 ]]; then
             printf "\n  Would restart fcitx5\n"
         else
-            pkill -9 -x fcitx5 2>/dev/null || true
-            sleep 0.3
-            ( fcitx5 -d --replace &>/dev/null & ) || true
-            printf "\n  Restarted fcitx5\n"
+            restart_fcitx5
         fi
     fi
 
