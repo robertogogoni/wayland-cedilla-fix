@@ -1,0 +1,66 @@
+name: Track Metrics
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6am UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch traffic and release metrics
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          DATE=$(date -u +%Y-%m-%d)
+          FILE=".github/metrics/daily.jsonl"
+          mkdir -p .github/metrics
+
+          # Traffic data (14-day window, we snapshot daily to build history)
+          CLONES=$(gh api "repos/$REPO/traffic/clones" --jq '{total: .count, unique: .uniques}' 2>/dev/null || echo '{"total":0,"unique":0}')
+          VIEWS=$(gh api "repos/$REPO/traffic/views" --jq '{total: .count, unique: .uniques}' 2>/dev/null || echo '{"total":0,"unique":0}')
+
+          # Release download counts
+          DOWNLOADS=$(gh api "repos/$REPO/releases" --jq '[.[] | {tag: .tag_name, downloads: ([.assets[].download_count] | add // 0)}]' 2>/dev/null || echo '[]')
+          TOTAL_DL=$(echo "$DOWNLOADS" | jq '[.[].downloads] | add // 0')
+
+          # Stars and forks
+          STARS=$(gh api "repos/$REPO" --jq '.stargazers_count' 2>/dev/null || echo 0)
+          FORKS=$(gh api "repos/$REPO" --jq '.forks_count' 2>/dev/null || echo 0)
+
+          # Top referrers
+          REFERRERS=$(gh api "repos/$REPO/traffic/popular/referrers" --jq '[.[:5] | .[] | {referrer, count, uniques}]' 2>/dev/null || echo '[]')
+
+          # Build daily entry
+          ENTRY=$(jq -n -c \
+            --arg date "$DATE" \
+            --argjson clones "$CLONES" \
+            --argjson views "$VIEWS" \
+            --argjson downloads "$TOTAL_DL" \
+            --argjson stars "$STARS" \
+            --argjson forks "$FORKS" \
+            --argjson referrers "$REFERRERS" \
+            '{date: $date, clones: $clones, views: $views, downloads: $downloads, stars: $stars, forks: $forks, referrers: $referrers}')
+
+          # Append only if this date isn't already recorded
+          if ! grep -q "\"$DATE\"" "$FILE" 2>/dev/null; then
+            echo "$ENTRY" >> "$FILE"
+            echo "Recorded metrics for $DATE"
+          else
+            echo "Metrics for $DATE already recorded, skipping"
+          fi
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/metrics/daily.jsonl
+          git diff --cached --quiet && echo "No changes" || git commit -m "metrics: $(date -u +%Y-%m-%d) daily snapshot" && git push
