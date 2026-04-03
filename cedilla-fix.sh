@@ -905,10 +905,12 @@ detect_keyboard() {
 
 detect_browsers() {
     BROWSERS=()
-    command -v chromium   >/dev/null 2>&1 && BROWSERS+=("chromium")
-    command -v brave      >/dev/null 2>&1 && BROWSERS+=("brave")
+    command -v chromium             >/dev/null 2>&1 && BROWSERS+=("chromium")
+    command -v brave                >/dev/null 2>&1 && BROWSERS+=("brave")
     command -v google-chrome-stable >/dev/null 2>&1 && BROWSERS+=("chrome")
-    command -v electron   >/dev/null 2>&1 && BROWSERS+=("electron")
+    command -v google-chrome-canary >/dev/null 2>&1 && BROWSERS+=("chrome-canary")
+    command -v vivaldi-stable       >/dev/null 2>&1 && BROWSERS+=("vivaldi")
+    command -v electron             >/dev/null 2>&1 && BROWSERS+=("electron")
 }
 
 print_detect_line() {
@@ -1004,6 +1006,7 @@ Fix cedilla (ç) input on Wayland compositors (Hyprland, Sway, GNOME, KDE, etc.)
 ${BOLD}Usage:${RESET}
   cedilla-fix.sh              Interactive install (default)
   cedilla-fix.sh --check      Verify current state, diagnose issues
+  cedilla-fix.sh --fix        Repair runtime issues without full reinstall
   cedilla-fix.sh --uninstall  Revert all changes from backups
   cedilla-fix.sh --dry-run    Show plan, change nothing
   cedilla-fix.sh --force      Skip confirmation (for scripting)
@@ -1012,6 +1015,7 @@ ${BOLD}Usage:${RESET}
 ${BOLD}Options:${RESET}
   -h, --help       Show this help message and exit
   --check          Check current cedilla configuration status
+  --fix            Repair runtime env (no logout needed)
   --uninstall      Revert changes using saved backups
   --dry-run        Preview changes without applying them
   --force          Skip interactive confirmations
@@ -1020,6 +1024,7 @@ ${BOLD}Examples:${RESET}
   cedilla-fix.sh --dry-run          See what would change
   cedilla-fix.sh --force            Install without prompts
   cedilla-fix.sh --check            Diagnose cedilla issues
+  cedilla-fix.sh --fix              Quick runtime repair
   cedilla-fix.sh --uninstall        Restore original files
 
 ${BOLD}Environment:${RESET}
@@ -1044,6 +1049,10 @@ parse_args() {
                 ;;
             --uninstall)
                 MODE="uninstall"
+                shift
+                ;;
+            --fix)
+                MODE="fix"
                 shift
                 ;;
             --dry-run)
@@ -1074,6 +1083,8 @@ browser_flags_file() {
         chromium)  printf '%s' "${HOME}/.config/chromium-flags.conf" ;;
         brave)     printf '%s' "${HOME}/.config/brave-flags.conf" ;;
         chrome)    printf '%s' "${HOME}/.config/chrome-flags.conf" ;;
+        chrome-canary) printf '%s' "${HOME}/.config/chrome-canary-flags.conf" ;;
+        vivaldi)       printf '%s' "${HOME}/.config/vivaldi-flags.conf" ;;
         electron)  printf '%s' "${HOME}/.config/electron-flags.conf" ;;
         *)         printf '%s' "" ;;
     esac
@@ -1505,6 +1516,89 @@ uninstall() {
 }
 
 # -----------------------------------------------------------------------------
+# Runtime Verification Helpers
+# -----------------------------------------------------------------------------
+
+# verify_systemd_env
+# Check that XCOMPOSEFILE in the systemd user session is set, absolute, and
+# points to an existing file. Returns 0=ok, 1=broken, 2=skip.
+verify_systemd_env() {
+    command -v systemctl >/dev/null 2>&1 || return 2
+
+    local sys_env
+    sys_env=$(systemctl --user show-environment 2>/dev/null) || return 2
+
+    local xcompose_val
+    xcompose_val=$(printf '%s\n' "$sys_env" | grep '^XCOMPOSEFILE=' | cut -d= -f2-)
+
+    if [[ -z "$xcompose_val" ]]; then
+        printf "  ${YELLOW}▸${RESET} systemd XCOMPOSEFILE     not set in session         ${YELLOW}✗${RESET}\n"
+        return 1
+    fi
+
+    if [[ "$xcompose_val" == "~"* ]]; then
+        printf "  ${YELLOW}▸${RESET} systemd XCOMPOSEFILE     literal ~ (won't resolve)  ${YELLOW}✗${RESET}\n"
+        return 1
+    fi
+
+    if [[ ! -f "$xcompose_val" ]]; then
+        printf "  ${YELLOW}▸${RESET} systemd XCOMPOSEFILE     file not found: %s ${YELLOW}✗${RESET}\n" "$xcompose_val"
+        return 1
+    fi
+
+    printf "  ${GREEN}▸${RESET} systemd XCOMPOSEFILE     %-27s${GREEN}✓${RESET}\n" "$xcompose_val"
+    return 0
+}
+
+# verify_fcitx5_process_env
+# Read XCOMPOSEFILE from the running fcitx5 process's /proc environ.
+# Returns 0=ok, 1=broken, 2=skip (not running or unreadable).
+verify_fcitx5_process_env() {
+    local pid
+    pid=$(pgrep -x fcitx5 2>/dev/null) || return 2
+
+    local proc_env
+    proc_env=$(tr '\0' '\n' < /proc/"$pid"/environ 2>/dev/null) || return 2
+
+    local xcompose_val
+    xcompose_val=$(printf '%s\n' "$proc_env" | grep '^XCOMPOSEFILE=' | cut -d= -f2-)
+
+    if [[ -z "$xcompose_val" || "$xcompose_val" == "~"* ]]; then
+        printf "  ${YELLOW}▸${RESET} fcitx5 process env       XCOMPOSEFILE broken        ${YELLOW}✗${RESET}\n"
+        printf "                              (run cedilla-fix --fix to repair)\n"
+        return 1
+    fi
+
+    if [[ ! -f "$xcompose_val" ]]; then
+        printf "  ${YELLOW}▸${RESET} fcitx5 process env       file missing: %s ${YELLOW}✗${RESET}\n" "$xcompose_val"
+        return 1
+    fi
+
+    printf "  ${GREEN}▸${RESET} fcitx5 process env       XCOMPOSEFILE correct       ${GREEN}✓${RESET}\n"
+    return 0
+}
+
+# verify_hyprland_envs
+# Check that the Hyprland envs.conf still contains our fcitx block.
+# Compositor updates (e.g. omarchy) can wipe it.
+# Returns 0=ok, 1=missing, 2=skip (not hyprland or no envs.conf).
+verify_hyprland_envs() {
+    [[ "$COMPOSITOR" != "hyprland" ]] && return 2
+
+    local env_conf="${HOME}/.config/hypr/envs.conf"
+    [[ ! -f "$env_conf" ]] && return 2
+
+    if grep -qF 'wayland-cedilla-fix:hyprland-env' "$env_conf" 2>/dev/null; then
+        printf "  ${GREEN}▸${RESET} Hyprland envs.conf       fcitx env block present    ${GREEN}✓${RESET}\n"
+        return 0
+    fi
+
+    printf "  ${YELLOW}▸${RESET} Hyprland envs.conf       fcitx env block missing    ${YELLOW}✗${RESET}\n"
+    printf "                              (compositor update may have wiped it)\n"
+    return 1
+}
+
+# -----------------------------------------------------------------------------
 # Check Mode — Diagnostic Status
 # -----------------------------------------------------------------------------
 
@@ -1602,6 +1696,27 @@ check_mode() {
         issues=$((issues + 1))
     fi
 
+    # --- Check 7: systemd session environment ---
+    local systemd_result=0
+    verify_systemd_env || systemd_result=$?
+    if [[ "$systemd_result" -eq 1 ]]; then
+        issues=$((issues + 1))
+    fi
+
+    # --- Check 8: fcitx5 process environment ---
+    local fcitx5_proc_result=0
+    verify_fcitx5_process_env || fcitx5_proc_result=$?
+    if [[ "$fcitx5_proc_result" -eq 1 ]]; then
+        issues=$((issues + 1))
+    fi
+
+    # --- Check 9: Hyprland env block ---
+    local hypr_env_result=0
+    verify_hyprland_envs || hypr_env_result=$?
+    if [[ "$hypr_env_result" -eq 1 ]]; then
+        issues=$((issues + 1))
+    fi
+
     printf "\n"
 
     # --- Summary & suggestions ---
@@ -1610,9 +1725,61 @@ check_mode() {
         printf "  If ' + c still produces ć, try logging out and back in.\n"
     else
         printf "  ${YELLOW}${BOLD}%d issue(s) found.${RESET}\n" "$issues"
-        printf "  Run ${BOLD}cedilla-fix.sh${RESET} to fix, or ${BOLD}cedilla-fix.sh --dry-run${RESET} to preview.\n"
+        printf "  Run ${BOLD}cedilla-fix --fix${RESET} for runtime repair, or ${BOLD}cedilla-fix${RESET} for full reinstall.\n"
     fi
 
+    printf "\n"
+}
+
+# -----------------------------------------------------------------------------
+# Fix Mode — Runtime Repair
+# -----------------------------------------------------------------------------
+
+fix_mode() {
+    printf "  ── Fix ───────────────────────────────────────────────\n"
+    printf "\n"
+
+    local fixed=0
+
+    # 1. Clean conflicting environment.d files
+    cleanup_conflicting_env_files && fixed=$((fixed + 1))
+
+    # 2. Ensure cedilla.conf has absolute path (no ${HOME})
+    local env_file="${HOME}/.config/environment.d/cedilla.conf"
+    if [[ -f "$env_file" ]]; then
+        if grep -qF '${HOME}' "$env_file" 2>/dev/null; then
+            info "  Fixing \${HOME} → absolute path in cedilla.conf"
+            sed -i "s|\${HOME}|${HOME}|g" "$env_file"
+            fixed=$((fixed + 1))
+        fi
+    fi
+
+    # 3. Inject env vars into running systemd session
+    activate_session_environment && fixed=$((fixed + 1))
+
+    # 4. Re-inject Hyprland env block if wiped
+    if [[ "$COMPOSITOR" == "hyprland" ]]; then
+        local env_conf="${HOME}/.config/hypr/envs.conf"
+        if [[ -f "$env_conf" ]] && ! grep -qF 'wayland-cedilla-fix:hyprland-env' "$env_conf" 2>/dev/null; then
+            info "  Re-injecting fcitx5 env block into envs.conf"
+            install_compositor_hyprland
+            fixed=$((fixed + 1))
+        fi
+    fi
+
+    # 5. Restart fcitx5 to pick up corrected environment
+    if pgrep -x fcitx5 >/dev/null 2>&1; then
+        restart_fcitx5
+        fixed=$((fixed + 1))
+    fi
+
+    printf "\n"
+    if [[ "$fixed" -gt 0 ]]; then
+        printf "  ${GREEN}✓${RESET} Applied %d runtime fix(es). No logout needed.\n" "$fixed"
+        printf "  Run ${BOLD}cedilla-fix --check${RESET} to verify.\n"
+    else
+        printf "  ${GREEN}✓${RESET} Nothing to fix — runtime environment looks correct.\n"
+    fi
     printf "\n"
 }
 
@@ -1628,7 +1795,7 @@ if [[ "$MODE" != "uninstall" ]]; then
 fi
 
 # Run detection for install and check modes
-if [[ "$MODE" == "install" ]] || [[ "$MODE" == "check" ]]; then
+if [[ "$MODE" == "install" ]] || [[ "$MODE" == "check" ]] || [[ "$MODE" == "fix" ]]; then
     run_detection
 fi
 
@@ -1640,6 +1807,9 @@ case "$MODE" in
         run_install
         run_verify
         print_success
+        ;;
+    fix)
+        fix_mode
         ;;
     check)
         check_mode
