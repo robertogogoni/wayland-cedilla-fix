@@ -1,0 +1,16 @@
+# Debug logs
+firebase-debug.log
+*.log
+
+# Editor files
+*.swp
+*~
+
+# macOS
+.DS_Store
+
+# AUR build artifacts (SRCINFO belongs in AUR repo only)
+.SRCINFO
+src/
+pkg/
+*.pkg.tar.zst
