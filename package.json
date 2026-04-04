@@ -3,8 +3,8 @@
   "version": "1.1.0",
   "description": "Fix cedilla (ç) on Wayland compositors — makes ' + c produce ç instead of ć",
   "bin": {
-    "cedilla-fix": "./cedilla-fix.sh",
-    "wayland-cedilla-fix": "./cedilla-fix.sh"
+    "cedilla-fix": "bin/cedilla-fix",
+    "wayland-cedilla-fix": "bin/cedilla-fix"
   },
   "scripts": {
     "postinstall": "echo '\\nRun \"cedilla-fix\" to apply the fix.\\n'"
@@ -41,6 +41,7 @@
   },
   "files": [
     "cedilla-fix.sh",
+    "bin/",
     "LICENSE",
     "README.md",
     "CHANGELOG.md"
