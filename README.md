@@ -1,19 +1,27 @@
 # wayland-cedilla-fix
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-  [![Downloads](https://img.shields.io/github/downloads/robertogogoni/wayland-cedilla-fix/total?style=flat-square&color=a6e3a1&label=downloads)](https://github.com/robertogogoni/wayland-cedilla-fix/releases)
+[![Downloads](https://img.shields.io/github/downloads/robertogogoni/wayland-cedilla-fix/total?style=flat-square&color=a6e3a1&label=downloads)](https://github.com/robertogogoni/wayland-cedilla-fix/releases)
 [![AUR](https://img.shields.io/aur/version/wayland-cedilla-fix?label=AUR)](https://aur.archlinux.org/packages/wayland-cedilla-fix)
 [![GitHub Release](https://img.shields.io/github/v/release/robertogogoni/wayland-cedilla-fix)](https://github.com/robertogogoni/wayland-cedilla-fix/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/robertogogoni/wayland-cedilla-fix)](https://github.com/robertogogoni/wayland-cedilla-fix/stargazers)
 
 **One command to make `' + c` produce `ç` instead of `ć` on Wayland.**
 
+### Install
+
+**Arch Linux (AUR):**
+```bash
+yay -S wayland-cedilla-fix
+cedilla-fix
+```
+
+**Any distro (curl):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/robertogogoni/wayland-cedilla-fix/main/cedilla-fix.sh | bash
 ```
 
-Or clone and run:
-
+**From source:**
 ```bash
 git clone https://github.com/robertogogoni/wayland-cedilla-fix.git
 cd wayland-cedilla-fix
@@ -95,31 +103,25 @@ The script also sets environment variables (`GTK_IM_MODULE`, `QT_IM_MODULE`, `XM
 
 ## Usage
 
-### Install (default)
+> If installed via AUR, use `cedilla-fix`. If running from source, use `bash cedilla-fix.sh`. Both are identical.
+
+### Apply the fix
 
 ```bash
-bash cedilla-fix.sh
+cedilla-fix
 ```
 
 Runs the full detection → plan → confirm → install → verify flow with animated output.
 
-### Dry Run
+### Check status
 
 ```bash
-bash cedilla-fix.sh --dry-run
+cedilla-fix --check
 ```
 
-Shows exactly what would be changed without modifying any files. Useful to preview the plan before committing.
+Runs diagnostics on 9 layers: config files, runtime systemd environment, fcitx5 process state, and Hyprland env block.
 
-### Check Status
-
-```bash
-bash cedilla-fix.sh --check
-```
-
-Runs diagnostics to show which components are configured correctly and which need fixing. Checks 9 layers including config files, runtime systemd environment, fcitx5 process state, and Hyprland env block.
-
-### Quick Fix (runtime repair)
+### Quick fix (runtime repair)
 
 ```bash
 cedilla-fix --fix
@@ -127,30 +129,26 @@ cedilla-fix --fix
 
 Repairs runtime issues without a full reinstall: cleans conflicting environment files, injects env vars into the running session, re-injects wiped Hyprland env blocks, and restarts fcitx5. No logout needed.
 
+### Dry run
+
+```bash
+cedilla-fix --dry-run
+```
+
+Shows exactly what would be changed without modifying any files.
+
 ### Uninstall
 
 ```bash
-bash cedilla-fix.sh --uninstall
+cedilla-fix --uninstall
 ```
 
 Reverts all changes from the most recent backup. The script creates timestamped backups before every install, so you can always go back.
 
-### Force Mode
-
-```bash
-bash cedilla-fix.sh --force
-```
-
-Skips the confirmation prompt. Combine with `--dry-run` for scripted checks:
-
-```bash
-bash cedilla-fix.sh --force --dry-run
-```
-
-### All Options
+### All options
 
 ```
-Usage: cedilla-fix.sh [OPTIONS]
+cedilla-fix [OPTIONS]
 
 Options:
   --help        Show help and exit
@@ -215,7 +213,7 @@ Look for `✗` marks — common issues after updates:
 Chromium-based browsers need the `--enable-wayland-ime` flag. The script adds this automatically, but if you installed a browser after running the fix:
 
 ```bash
-bash cedilla-fix.sh  # Re-run to pick up new browsers
+cedilla-fix  # Re-run to pick up new browsers
 ```
 
 ### Question mark (?) produces colon (:) or other wrong characters
@@ -250,8 +248,8 @@ hyprctl devices | grep -A1 "Keyboard"
 XWayland apps use the X11 Compose table. The script installs `~/.XCompose` which should cover this, but some apps cache the old table. Try:
 
 ```bash
-# Restart the app, or:
-killall fcitx5 && fcitx5 -d --replace
+# Restart the app, or run the quick fix:
+cedilla-fix --fix
 ```
 
 ### GTK4 apps ignore XCompose

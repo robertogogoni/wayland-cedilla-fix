@@ -9,6 +9,9 @@ firebase-debug.log
 # macOS
 .DS_Store
 
+# Internal planning docs
+docs/
+
 # AUR build artifacts (SRCINFO belongs in AUR repo only)
 .SRCINFO
 src/
