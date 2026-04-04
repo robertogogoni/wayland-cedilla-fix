@@ -12,7 +12,7 @@ jobs:
   track:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Fetch and record metrics
         env:
@@ -42,9 +42,16 @@ jobs:
             VIEW_UNIQUE=$(echo "$views_raw" | jq -r '.uniques // 0')
           fi
 
-          DOWNLOADS=0
+          # GitHub release asset downloads
+          GH_DOWNLOADS=0
           if dl_raw=$(gh api "repos/$REPO/releases" 2>/dev/null); then
-            DOWNLOADS=$(echo "$dl_raw" | jq '[.[].assets[]?.download_count // 0] | add // 0')
+            GH_DOWNLOADS=$(echo "$dl_raw" | jq '[.[].assets[]?.download_count // 0] | add // 0')
+          fi
+
+          # npm weekly downloads
+          NPM_DOWNLOADS=0
+          if npm_raw=$(curl -fsSL "https://api.npmjs.org/downloads/point/last-week/wayland-cedilla-fix" 2>/dev/null); then
+            NPM_DOWNLOADS=$(echo "$npm_raw" | jq -r '.downloads // 0')
           fi
 
           STARS=0; FORKS=0
@@ -63,10 +70,10 @@ jobs:
             --arg d "$DATE" \
             --argjson ct "$CLONE_TOTAL" --argjson cu "$CLONE_UNIQUE" \
             --argjson vt "$VIEW_TOTAL" --argjson vu "$VIEW_UNIQUE" \
-            --argjson dl "$DOWNLOADS" \
+            --argjson ghd "$GH_DOWNLOADS" --argjson npmd "$NPM_DOWNLOADS" \
             --argjson s "$STARS" --argjson f "$FORKS" \
             --argjson r "$REFERRERS" \
-            '{date:$d, clones:{total:$ct,unique:$cu}, views:{total:$vt,unique:$vu}, downloads:$dl, stars:$s, forks:$f, referrers:$r}')
+            '{date:$d, clones:{total:$ct,unique:$cu}, views:{total:$vt,unique:$vu}, downloads:{github:$ghd,npm_weekly:$npmd}, stars:$s, forks:$f, referrers:$r}')
 
           echo "$ENTRY" >> "$FILE"
           echo "Recorded: $ENTRY"
