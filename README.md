@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/robertogogoni/wayland-cedilla-fix/total?style=flat-square&color=a6e3a1&label=downloads)](https://github.com/robertogogoni/wayland-cedilla-fix/releases)
+[![npm](https://img.shields.io/npm/v/wayland-cedilla-fix?label=npm)](https://www.npmjs.com/package/wayland-cedilla-fix)
 [![AUR](https://img.shields.io/aur/version/wayland-cedilla-fix?label=AUR)](https://aur.archlinux.org/packages/wayland-cedilla-fix)
 [![GitHub Release](https://img.shields.io/github/v/release/robertogogoni/wayland-cedilla-fix)](https://github.com/robertogogoni/wayland-cedilla-fix/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/robertogogoni/wayland-cedilla-fix)](https://github.com/robertogogoni/wayland-cedilla-fix/stargazers)
@@ -14,6 +15,11 @@
 ```bash
 yay -S wayland-cedilla-fix
 cedilla-fix
+```
+
+**Any distro (npx):**
+```bash
+npx wayland-cedilla-fix
 ```
 
 **Any distro (curl):**

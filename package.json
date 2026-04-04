@@ -1,0 +1,48 @@
+{
+  "name": "wayland-cedilla-fix",
+  "version": "1.1.0",
+  "description": "Fix cedilla (ç) on Wayland compositors — makes ' + c produce ç instead of ć",
+  "bin": {
+    "cedilla-fix": "./cedilla-fix.sh",
+    "wayland-cedilla-fix": "./cedilla-fix.sh"
+  },
+  "scripts": {
+    "postinstall": "echo '\\nRun \"cedilla-fix\" to apply the fix.\\n'"
+  },
+  "keywords": [
+    "wayland",
+    "cedilla",
+    "fcitx5",
+    "hyprland",
+    "sway",
+    "linux",
+    "keyboard",
+    "input-method",
+    "xcompose",
+    "dead-keys",
+    "portuguese",
+    "us-international"
+  ],
+  "author": "Roberto Gogoni <robertogogoni@outlook.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/robertogogoni/wayland-cedilla-fix.git"
+  },
+  "bugs": {
+    "url": "https://github.com/robertogogoni/wayland-cedilla-fix/issues"
+  },
+  "homepage": "https://github.com/robertogogoni/wayland-cedilla-fix#readme",
+  "os": [
+    "linux"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "cedilla-fix.sh",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ]
+}
