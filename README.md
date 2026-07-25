@@ -71,6 +71,7 @@ The script also sets environment variables (`GTK_IM_MODULE`, `QT_IM_MODULE`, `XM
 |-----------|--------|-------|
 | Hyprland | ✅ Tested | Auto-patches `hyprland.conf` |
 | Sway | ✅ Supported | Auto-patches `config` |
+| GNOME | ✅ Supported | Sets `gtk-im-module=ibus` via gsettings + dconf |
 | river | ✅ Supported | Via environment config |
 | labwc | ✅ Supported | Auto-patches `rc.xml` |
 | Generic wlroots | ⚠️ Partial | Environment-only (no compositor config) |
@@ -81,6 +82,7 @@ The script also sets environment variables (`GTK_IM_MODULE`, `QT_IM_MODULE`, `XM
 |-----------|--------|-------|
 | fcitx5 | ✅ Full | Profile + XCompose + environment |
 | ibus | ⚠️ Partial | XCompose + environment only |
+| ibus (GNOME) | ✅ Full | gsettings + dconf + XCompose |
 | None | ⚠️ Minimal | XCompose only (install fcitx5 for best results) |
 
 ### Browsers
@@ -101,7 +103,7 @@ The script also sets environment variables (`GTK_IM_MODULE`, `QT_IM_MODULE`, `XM
 |--------|--------|-------|
 | Arch Linux | ✅ Tested | Primary development target |
 | Fedora | ⚠️ Untested | Should work (same packages) |
-| Ubuntu 24.04+ | ⚠️ Untested | Needs Wayland session |
+| Ubuntu 24.04+ | ✅ Tested | GNOME Wayland — auto-configures IBus |
 | NixOS | ⚠️ Untested | May need path adjustments |
 
 ---

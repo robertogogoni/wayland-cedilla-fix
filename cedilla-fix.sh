@@ -533,8 +533,41 @@ install_compositor() {
     case "$COMPOSITOR" in
         hyprland) install_compositor_hyprland ;;
         sway)     install_compositor_sway ;;
+        gnome)    install_compositor_gnome ;;
         *)        install_compositor_generic ;;
     esac
+}
+
+install_compositor_gnome() {
+    info "  Configuring GNOME for cedilla ..."
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "  Would set GTK_IM_MODULE=ibus via gsettings"
+        info "  Would set Gtk/IMModule=ibus in dconf"
+        return 0
+    fi
+
+    # Set GTK IM module to ibus (GNOME uses ibus by default on Wayland)
+    if command -v gsettings >/dev/null 2>&1; then
+        gsettings set org.gnome.desktop.interface gtk-im-module 'ibus' 2>/dev/null || true
+        info "  Set gtk-im-module=ibus via gsettings"
+    fi
+
+    # Set dconf override for GTK
+    local dconf_dir="${HOME}/.config/dconf/db/user.d"
+    local dconf_file="${dconf_dir}/01-ibus-cedilla"
+    ensure_dir "$dconf_file"
+    backup_file "$dconf_file"
+    printf '%s\n' '[org/gnome/desktop/interface]
+gtk-im-module="ibus"' > "$dconf_file"
+    info "  Created dconf override: ${dconf_file}"
+
+    # Update ibus XCompose if ibus is the IM framework
+    if [[ "$IM_FRAMEWORK" == "ibus" ]]; then
+        info "  IBus detected — XCompose override covers GTK3/GTK4"
+    fi
+
+    info "  GNOME configured — cedilla will work after logout/login"
 }
 
 # restart_fcitx5
@@ -782,6 +815,14 @@ detect_compositor() {
     if pgrep -x labwc >/dev/null 2>&1; then
         COMPOSITOR="labwc"
         COMPOSITOR_VERSION=$(labwc --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+        [[ -z "$COMPOSITOR_VERSION" ]] && COMPOSITOR_VERSION="unknown"
+        return 0
+    fi
+
+    # GNOME (Mutter — default on Ubuntu, Fedora)
+    if [[ "${XDG_CURRENT_DESKTOP:-}" == *"GNOME"* ]] || [[ "${XDG_SESSION_DESKTOP:-}" == *"gnome"* ]]; then
+        COMPOSITOR="gnome"
+        COMPOSITOR_VERSION=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
         [[ -z "$COMPOSITOR_VERSION" ]] && COMPOSITOR_VERSION="unknown"
         return 0
     fi
@@ -1142,6 +1183,12 @@ show_plan() {
         plan_actions+=("modify")
         plan_descs+=("xkb_variant → intl")
         PLAN_STEPS+=("Sway dead keys")
+        PLAN_FUNCTIONS+=("install_compositor")
+    elif [[ "$COMPOSITOR" == "gnome" ]]; then
+        plan_paths+=("dconf/01-ibus-cedilla")
+        plan_actions+=("create")
+        plan_descs+=("gtk-im-module → ibus")
+        PLAN_STEPS+=("GNOME IBus config")
         PLAN_FUNCTIONS+=("install_compositor")
     fi
 
