@@ -911,6 +911,9 @@ detect_browsers() {
     command -v google-chrome-canary >/dev/null 2>&1 && BROWSERS+=("chrome-canary")
     command -v vivaldi-stable       >/dev/null 2>&1 && BROWSERS+=("vivaldi")
     command -v electron             >/dev/null 2>&1 && BROWSERS+=("electron")
+
+    # Browsers are optional; a missing final probe must not abort detection.
+    return 0
 }
 
 print_detect_line() {
