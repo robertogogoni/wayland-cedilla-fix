@@ -1748,8 +1748,12 @@ fix_mode() {
     local env_file="${HOME}/.config/environment.d/cedilla.conf"
     if [[ -f "$env_file" ]]; then
         if grep -qF '${HOME}' "$env_file" 2>/dev/null; then
-            info "  Fixing \${HOME} → absolute path in cedilla.conf"
-            sed -i "s|\${HOME}|${HOME}|g" "$env_file"
+            if [[ "$DRY_RUN" -eq 1 ]]; then
+                info "  Would replace \${HOME} with absolute path in cedilla.conf"
+            else
+                info "  Fixing \${HOME} → absolute path in cedilla.conf"
+                sed -i "s|\${HOME}|${HOME}|g" "$env_file"
+            fi
             fixed=$((fixed + 1))
         fi
     fi
@@ -1774,7 +1778,9 @@ fix_mode() {
     fi
 
     printf "\n"
-    if [[ "$fixed" -gt 0 ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf "  %bDry run -- no changes applied.%b\n" "$BOLD" "$RESET"
+    elif [[ "$fixed" -gt 0 ]]; then
         printf "  ${GREEN}✓${RESET} Applied %d runtime fix(es). No logout needed.\n" "$fixed"
         printf "  Run ${BOLD}cedilla-fix --check${RESET} to verify.\n"
     else
